@@ -1,0 +1,1 @@
+"""Pacote com o modelo de dados da Faculdade e as queries SQL do grafo."""
