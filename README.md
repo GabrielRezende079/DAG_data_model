@@ -33,3 +33,5 @@ A estrutura de dados deve representar o funcionamento de uma Faculdade Entidades
 * SALA 1:1 MATÉRIAS
 
 * PROFESSOR 1:N SALAS
+
+<img width="1865" height="787" alt="Image" src="https://github.com/user-attachments/assets/8a2d6b9b-9a9a-48ee-9374-e0fb64ad4f70" />
