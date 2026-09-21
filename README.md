@@ -34,4 +34,4 @@ A estrutura de dados deve representar o funcionamento de uma Faculdade Entidades
 
 * PROFESSOR 1:N SALAS
 
-<img width="1865" height="787" alt="Image" src="https://github.com/user-attachments/assets/8a2d6b9b-9a9a-48ee-9374-e0fb64ad4f70" />
+<img width="1872" height="787" alt="Image" src="https://github.com/user-attachments/assets/49264f3b-8928-4c46-b208-67948fa94e8d" />
