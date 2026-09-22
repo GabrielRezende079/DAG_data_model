@@ -133,7 +133,7 @@ def gerar_dot(nos: dict, arestas: list, destino: Path) -> None:
 
 def imprimir_grafo(nos: dict, adj: dict) -> None:
     """Mostra a lista de adjacencia de forma legivel."""
-    print("[3] Grafo montado em memoria -> lista de adjacencia:")
+    print("[4] Grafo montado em memoria -> lista de adjacencia:")
     for chave in sorted(adj):
         tipo, rotulo, _ = nos[chave]
         viz = ", ".join(f"{d}({r})" for d, r in sorted(adj[chave])) or "-"
@@ -145,32 +145,55 @@ def imprimir_grafo(nos: dict, adj: dict) -> None:
 # main
 # ---------------------------------------------------------------------------
 
+def validar_fragmentos(conn, nome: str, fragmentos: list) -> None:
+    """Executa cada fragmento SQL isoladamente e relata os resultados.
+
+    Serve como 'check-up' da modelagem: se um fragmento falhar, o erro
+    aponta exatamente o nome dele, sem misturar responsabilidades.
+    """
+    print(f"    validando {nome}:")
+    for rotulo, frag in fragmentos:
+        try:
+            total = conn.execute(
+                f"SELECT COUNT(*) AS c FROM ({frag})"
+            ).fetchone()["c"]
+        except Exception as erro:
+            raise RuntimeError(f"[FALHA no fragmento '{rotulo}'] {erro}") from erro
+        print(f"        {rotulo:<24} {total} linha(s)")
+
+
 def main() -> None:
     preparar_dados()
 
     with conectar() as conn:
-        # --- SQL puro transforma o relacional em grafo ---
+        # --- Valida cada fragmento isoladamente (responsabilidade unica) ---
+        print("[2] Check-up dos fragmentos SQL (execucao isolada):")
+        validar_fragmentos(conn, "nos", gq.NOS_FRAGMENTOS)
+        validar_fragmentos(conn, "arestas", gq.ARESTAS_FRAGMENTOS)
+        print()
+
+        # --- SQL (composicao UNION ALL) transforma o relacional em grafo ---
         nos = buscar_nos(conn)
         arestas = buscar_arestas(conn)
 
         # --- Queries analiticas (JOIN + UNION ALL em acao) ---
-        nos_por_tipo = conn.execute(gq.ANALISE_NOS_POR_TIPO_SQL).fetchall()
-        arestas_por_relacao = conn.execute(gq.ANALISE_ARESTAS_POR_RELACAO_SQL).fetchall()
+        nos_por_tipo = conn.execute(gq.CONTAGEM_NOS_POR_TIPO_SQL).fetchall()
+        arestas_por_relacao = conn.execute(gq.CONTAGEM_ARESTAS_POR_RELACAO_SQL).fetchall()
         salas_por_professor = conn.execute(gq.SALAS_POR_PROFESSOR_SQL).fetchall()
 
     # --- Grafo em memoria ---
     grafo = GrafoFaculdade(nos, arestas)
 
-    print("[2] NOS extraidos via UNION ALL x3 (um SELECT por entidade):")
+    print("[3] NOS extraidos via UNION ALL x4 (um SELECT por entidade):")
     print("    " + " + ".join(f"{linha['tipo']}={linha['total']}" for linha in nos_por_tipo))
-    print("[2] ARESTAS extraidas via JOIN x4 + UNION ALL x3:")
+    print("[3] ARESTAS extraidas via JOIN + UNION ALL x4:")
     print("    " + " + ".join(f"{linha['relacao']}={linha['total']}" for linha in arestas_por_relacao))
     print()
     imprimir_grafo(nos, grafo.adj)
 
     # --- Analises sobre o grafo ---
     ordem = eh_dag(grafo.adj)
-    print("[4] Analises do grafo:")
+    print("[5] Analises do grafo:")
     print("    - Eh DAG?", "SIM" if ordem else "NAO (existe ciclo)")
     if ordem:
         exemplos = [c for c in ordem if nos[c][0] == "professor"] + \
@@ -199,7 +222,7 @@ def main() -> None:
     # --- Exporta o DOT para visualizacao externa ---
     dot = Path(__file__).resolve().parent / "output" / "grafo.dot"
     gerar_dot(nos, arestas, dot)
-    print(f"[5] Grafo exportado: {dot}")
+    print(f"[6] Grafo exportado: {dot}")
     print('    Renderize com:  dot -Tpng output/grafo.dot -o output/grafo.png')
 
 

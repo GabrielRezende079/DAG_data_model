@@ -1,161 +1,170 @@
 """
-Construcao do grafo feito 100% em SQL.
+Construcao do grafo em SQL, modelado de forma MODULAR.
 
-A ideia central do desafio: transformar os dados RELACIONAIS (4 tabelas)
-em uma estrutura de GRAFO (nos + arestas).
+A ideia: em vez de um unico bloco SQL gigante, cada SELECT de nos e de
+aresta e definido como um FRAGMENTO isolado, com responsabilidade unica
+e nome proprio (ex.: "nos_de_aluno", "aresta_ministra_em").
 
-    NOS    : cada registro de ALUNO, PROFESSOR, MATERIA e SALA vira um
-             no identificado por "<tipo>_<id>".
+Vantagens:
 
-    ARESTAS: cada relacionamento entre entidades vira uma aresta
-             (origem -> destino), rotulada pelo tipo de relacao.
+    * Execucao isolada -> se um fragmento falhar, sabemos exatamente qual
+      e onde (o main.py valida cada um individualmente).
+    * Composicao simples -> os fragmentos sao unidos com UNION ALL,
+      satisfazendo o requisito de ">= 2 UNION ALL como metodos do no".
+    * Reuso -> as consultas analiticas (contagem de nos/arestas) consomem
+      os proprios fragmentos, sem duplicar SQL.
 
-Requisitos obrigatorios atendidos aqui:
+Fluxo de dados (relacional -> grafo):
 
-    * >= 2 UNION ALL ... como metodos de construcao dos NOS
-        -> NOS_SQL combina as 4 entidades com 3 UNION ALL.
-    * >= 1 JOIN ....... para montar as ARESTAS
-        -> cada aresta nasce de um JOIN entre as tabelas relacionadas.
-        -> ARESTAS_SQL usa 3 UNION ALL + 4 JOINs.
+    NOS    : ALUNO, PROFESSOR, MATERIA e SALA viram nos "<tipo>_<id>".
+    ARESTAS: cada relacionamento vira uma aresta (origem -> destino), com
+             uma UNION ALL por tipo de relacao + JOINs.
 
-Orientacao das arestas escolhida para manter o grafo como um DAG
-(sem ciclos), seguindo o fluxo PROFESSOR -> SALA -> MATERIA -> ALUNO:
+Orientacao das arestas (mantem o grafo como DAG):
 
-    PROFESSOR -> SALA   (PROFESSOR 1:N SALAS)          via SALA.professor_id
-    SALA      -> MATERIA (SALA 1:1 MATERIAS)            via MATERIA.sala_id
-    MATERIA   -> ALUNO  (MATERIA 1:N ALUNOS)            via ALUNO.materia_id
-    PROFESSOR -> ALUNO  (ALUNO N:N PROFESSOR)           via ALUNO_PROFESSOR
+    PROFESSOR -> SALA    (PROFESSOR 1:N SALAS)       via SALA.professor_id
+    SALA      -> MATERIA  (SALA 1:1 MATERIAS)         via MATERIA.sala_id
+    MATERIA   -> ALUNO   (MATERIA 1:N ALUNOS)         via ALUNO.materia_id
+    PROFESSOR -> ALUNO   (ALUNO N:N PROFESSOR)        via ALUNO_PROFESSOR
 """
 
-# ---------------------------------------------------------------------------
-# NOS: uma UNION ALL por entidade = 3 operacoes UNION ALL
-# Cada SELECT precisa ter as MESMAS colunas (mesma "forma" do registro).
-# ---------------------------------------------------------------------------
+# ===========================================================================
+# FRAGMENTO 1 - NOS
+# Cada fragmento e um SELECT completo que produz nos de UMA entidade.
+# Colunas sempre na mesma ordem: (chave, tipo, rotulo, cor).
+# ===========================================================================
 
-NOS_SQL = """
-WITH nos AS (
-    SELECT 'aluno'     AS tipo, 'aluno_'     || CAST(a.id AS TEXT) AS chave,
-           a.nome      AS rotulo, 'skyblue'  AS cor
-    FROM ALUNO a
-
-    UNION ALL
-
-    SELECT 'professor' AS tipo, 'professor_' || CAST(p.id AS TEXT) AS chave,
-           p.nome      AS rotulo, 'lightgreen' AS cor
-    FROM PROFESSOR p
-
-    UNION ALL
-
-    SELECT 'materia'   AS tipo, 'materia_'   || CAST(m.id AS TEXT) AS chave,
-           m.nome      AS rotulo, 'orange'   AS cor
-    FROM MATERIA m
-
-    UNION ALL
-
-    SELECT 'sala'      AS tipo, 'sala_'      || CAST(s.id AS TEXT) AS chave,
-           s.numero    AS rotulo, 'plum'     AS cor
-    FROM SALA s
-)
-SELECT chave, tipo, rotulo, cor
-FROM nos
-ORDER BY tipo, rotulo;
+NOS_ALUNO_SQL = """
+SELECT 'aluno_'  || CAST(a.id AS TEXT) AS chave,
+       'aluno'                   AS tipo,
+       a.nome                    AS rotulo,
+       'skyblue'                 AS cor
+FROM ALUNO a
 """
 
-# ---------------------------------------------------------------------------
-# ARESTAS: cada relacionamento vira uma aresta dirigida.
-# 4 JOINs (um por relacao) + 3 UNION ALL combinando os resultados.
-# ---------------------------------------------------------------------------
-
-ARESTAS_SQL = """
-WITH arestas AS (
-    -- PROFESSOR -> SALA   | PROFESSOR 1:N SALAS
-    SELECT 'professor_' || p.id AS origem,
-           'sala_'      || s.id AS destino,
-           'MINISTRA_EM'  AS relacao,
-           'Professor leciona na sala' AS descricao
-    FROM SALA s
-    JOIN PROFESSOR p ON s.professor_id = p.id
-
-    UNION ALL
-
-    -- SALA -> MATERIA | SALA 1:1 MATERIAS
-    SELECT 'sala_'      || s.id AS origem,
-           'materia_'   || m.id AS destino,
-           'ABRIGA'        AS relacao,
-           'Sala abriga a materia' AS descricao
-    FROM MATERIA m
-    JOIN SALA s ON m.sala_id = s.id
-
-    UNION ALL
-
-    -- MATERIA -> ALUNO | MATERIA 1:N ALUNOS
-    SELECT 'materia_'   || m.id AS origem,
-           'aluno_'     || a.id AS destino,
-           'TEM_ALUNO'     AS relacao,
-           'Materia possui o aluno' AS descricao
-    FROM ALUNO a
-    JOIN MATERIA m ON a.materia_id = m.id
-
-    UNION ALL
-
-    -- PROFESSOR -> ALUNO | ALUNO N:N PROFESSOR (tabela associativa)
-    SELECT 'professor_' || p.id AS origem,
-           'aluno_'     || a.id AS destino,
-           'LECIONA_PARA'  AS relacao,
-           'Professor leciona para o aluno' AS descricao
-    FROM ALUNO_PROFESSOR ap
-    JOIN PROFESSOR p ON ap.professor_id = p.id
-    JOIN ALUNO a      ON ap.aluno_id    = a.id
-)
-SELECT origem, destino, relacao, descricao
-FROM arestas
-ORDER BY relacao, origem, destino;
+NOS_PROFESSOR_SQL = """
+SELECT 'professor_' || CAST(p.id AS TEXT) AS chave,
+       'professor'              AS tipo,
+       p.nome                   AS rotulo,
+       'lightgreen'             AS cor
+FROM PROFESSOR p
 """
 
-# ---------------------------------------------------------------------------
-# Queries analiticas sobre o grafo (demonstram o uso de JOIN + UNION ALL
-# para responder perguntas de negocio).
-# ---------------------------------------------------------------------------
+NOS_MATERIA_SQL = """
+SELECT 'materia_'  || CAST(m.id AS TEXT) AS chave,
+       'materia'                AS tipo,
+       m.nome                   AS rotulo,
+       'orange'                 AS cor
+FROM MATERIA m
+"""
 
-# Quantos nos existem de cada tipo (cardinalidade de cada entidade)?
-ANALISE_NOS_POR_TIPO_SQL = """
-WITH nos AS (
-    SELECT 'aluno'     AS tipo, a.id AS no_id FROM ALUNO a
-    UNION ALL
-    SELECT 'professor' AS tipo, p.id AS no_id FROM PROFESSOR p
-    UNION ALL
-    SELECT 'materia'   AS tipo, m.id AS no_id FROM MATERIA m
-    UNION ALL
-    SELECT 'sala'      AS tipo, s.id AS no_id FROM SALA s
-)
+NOS_SALA_SQL = """
+SELECT 'sala_' || CAST(s.id AS TEXT)       AS chave,
+       'sala'                   AS tipo,
+       s.numero                 AS rotulo,
+       'plum'                   AS cor
+FROM SALA s
+"""
+
+# Lista nomeada de fragmentos (nome, sql) - usada na composicao e na validacao.
+NOS_FRAGMENTOS = [
+    ("nos_de_aluno", NOS_ALUNO_SQL),
+    ("nos_de_professor", NOS_PROFESSOR_SQL),
+    ("nos_de_materia", NOS_MATERIA_SQL),
+    ("nos_de_sala", NOS_SALA_SQL),
+]
+
+# ===========================================================================
+# FRAGMENTO 2 - ARESTAS
+# Cada fragmento transforma UMA relacao em uma aresta dirigida.
+# Colunas sempre na mesma ordem: (origem, destino, relacao, descricao).
+# ===========================================================================
+
+ARESTA_PROFESSOR_SALA_SQL = """
+SELECT 'professor_' || p.id             AS origem,
+       'sala_'      || s.id             AS destino,
+       'MINISTRA_EM'                    AS relacao,
+       'Professor leciona na sala'      AS descricao
+FROM SALA s
+JOIN PROFESSOR p ON s.professor_id = p.id
+"""
+
+ARESTA_SALA_MATERIA_SQL = """
+SELECT 'sala_'      || s.id             AS origem,
+       'materia_'   || m.id             AS destino,
+       'ABRIGA'                         AS relacao,
+       'Sala abriga a materia'          AS descricao
+FROM MATERIA m
+JOIN SALA s ON m.sala_id = s.id
+"""
+
+ARESTA_MATERIA_ALUNO_SQL = """
+SELECT 'materia_'   || m.id             AS origem,
+       'aluno_'     || a.id             AS destino,
+       'TEM_ALUNO'                      AS relacao,
+       'Materia possui o aluno'         AS descricao
+FROM ALUNO a
+JOIN MATERIA m ON a.materia_id = m.id
+"""
+
+ARESTA_PROFESSOR_ALUNO_SQL = """
+SELECT 'professor_' || p.id             AS origem,
+       'aluno_'     || a.id             AS destino,
+       'LECIONA_PARA'                   AS relacao,
+       'Professor leciona para o aluno' AS descricao
+FROM ALUNO_PROFESSOR ap
+JOIN PROFESSOR p ON ap.professor_id = p.id
+JOIN ALUNO a      ON ap.aluno_id    = a.id
+"""
+
+ARESTAS_FRAGMENTOS = [
+    ("aresta_ministra_em", ARESTA_PROFESSOR_SALA_SQL),
+    ("aresta_abriga", ARESTA_SALA_MATERIA_SQL),
+    ("aresta_tem_aluno", ARESTA_MATERIA_ALUNO_SQL),
+    ("aresta_leciona_para", ARESTA_PROFESSOR_ALUNO_SQL),
+]
+
+# ===========================================================================
+# COMPOSICAO
+# Funcao unica de juncao: fragmentos independentes virando uma unica
+# consulta via UNION ALL - o requisito obrigatorio do desafio.
+# ===========================================================================
+
+UNION_ALL = "\n\n    UNION ALL\n\n"
+
+
+def combinar(fragmentos: list[tuple[str, str]]) -> str:
+    """Une os SQL de cada fragmento com UNION ALL (core, sem ORDER BY)."""
+    return UNION_ALL.join(frag.replace(";", "").strip() for _, frag in fragmentos)
+
+
+# Consultas prontas para o grafo (core + ordenacao final para leitura).
+NOS_SQL = combinar(NOS_FRAGMENTOS) + "\nORDER BY tipo, rotulo;\n"
+ARESTAS_SQL = combinar(ARESTAS_FRAGMENTOS) + "\nORDER BY relacao, origem, destino;\n"
+
+
+# ===========================================================================
+# CONSULTAS ANALITICAS (responsabilidade unica, cada uma responde 1 pergunta)
+# Reutilizam os fragmentos acima por composicao - sem duplicar SQL.
+# ===========================================================================
+
+# Pergunta 1: quantos nos existem por tipo de entidade?
+CONTAGEM_NOS_POR_TIPO_SQL = f"""
 SELECT tipo, COUNT(*) AS total
-FROM nos
-GROUP BY tipo;
+FROM ( {combinar(NOS_FRAGMENTOS)} )
+GROUP BY tipo
+ORDER BY total DESC;
 """
 
-# Quantas arestas existem de cada tipo de relacao?
-ANALISE_ARESTAS_POR_RELACAO_SQL = """
-WITH arestas AS (
-    SELECT 'MINISTRA_EM' AS relacao
-    FROM SALA s JOIN PROFESSOR p ON s.professor_id = p.id
-    UNION ALL
-    SELECT 'ABRIGA'
-    FROM MATERIA m JOIN SALA s ON m.sala_id = s.id
-    UNION ALL
-    SELECT 'TEM_ALUNO'
-    FROM ALUNO a JOIN MATERIA m ON a.materia_id = m.id
-    UNION ALL
-    SELECT 'LECIONA_PARA'
-    FROM ALUNO_PROFESSOR ap
-    JOIN PROFESSOR p ON ap.professor_id = p.id
-    JOIN ALUNO a      ON ap.aluno_id    = a.id
-)
+# Pergunta 2: quantas arestas existem por tipo de relacao?
+CONTAGEM_ARESTAS_POR_RELACAO_SQL = f"""
 SELECT relacao, COUNT(*) AS total
-FROM arestas
-GROUP BY relacao;
+FROM ( {combinar(ARESTAS_FRAGMENTOS)} )
+GROUP BY relacao
+ORDER BY total DESC;
 """
 
-# Numero de salas por professor (JOIN simples -> contagem).
+# Pergunta 3: quantas salas cada professor ocupa? (JOIN simples de contagem)
 SALAS_POR_PROFESSOR_SQL = """
 SELECT p.nome AS professor, COUNT(s.id) AS salas
 FROM PROFESSOR p
